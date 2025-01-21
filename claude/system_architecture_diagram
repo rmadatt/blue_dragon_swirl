@@ -1,0 +1,67 @@
+flowchart TB
+    subgraph Client["Client Layer"]
+        WUI["Web Interface\n(React Frontend)"]
+        MOB["Mobile App\n(Optional)"]
+    end
+
+    subgraph API["API Layer"]
+        API_GW["API Gateway\n(FastAPI)"]
+        AUTH["Authentication &\nAuthorization"]
+        VALID["Request Validation"]
+    end
+
+    subgraph CV["Computer Vision Pipeline"]
+        direction TB
+        IMG_PRE["Image Preprocessing\n- Noise Reduction\n- Color Normalization\n- Resolution Adjustment"]
+        FEAT_EXT["Feature Extraction\n- Texture Analysis\n- Color Analysis\n- Pattern Detection"]
+        ANOM_DET["Anomaly Detection\n- ML Model\n- Decision Engine"]
+        QUAL_CLASS["Quality Classification\n- Safety Scoring\n- Defect Categorization"]
+    end
+
+    subgraph Storage["Data Storage"]
+        DB[(Main Database\nPostgreSQL)]
+        IMG_STORE[("Image Storage\nObject Store")]
+        MODEL_STORE[("Model Storage\nVersioned Models")]
+    end
+
+    subgraph Monitor["Monitoring & Logging"]
+        METRICS["System Metrics"]
+        LOGS["Application Logs"]
+        ALERTS["Alert System"]
+    end
+
+    %% Client to API Layer
+    WUI --> API_GW
+    MOB --> API_GW
+    
+    %% API Layer Flow
+    API_GW --> AUTH
+    AUTH --> VALID
+    VALID --> IMG_PRE
+
+    %% Computer Vision Pipeline Flow
+    IMG_PRE --> FEAT_EXT
+    FEAT_EXT --> ANOM_DET
+    ANOM_DET --> QUAL_CLASS
+
+    %% Storage Interactions
+    IMG_PRE --> IMG_STORE
+    QUAL_CLASS --> DB
+    ANOM_DET --> MODEL_STORE
+    
+    %% Monitoring Connections
+    API_GW -.-> METRICS
+    CV -.-> LOGS
+    QUAL_CLASS -.-> ALERTS
+
+    %% Styling
+    classDef primary fill:#e1f5fe,stroke:#01579b,stroke-width:2px
+    classDef secondary fill:#f3e5f5,stroke:#4a148c,stroke-width:2px
+    classDef storage fill:#e8f5e9,stroke:#1b5e20,stroke-width:2px
+    classDef monitoring fill:#fff3e0,stroke:#e65100,stroke-width:2px
+
+    class WUI,MOB primary
+    class API_GW,AUTH,VALID secondary
+    class IMG_PRE,FEAT_EXT,ANOM_DET,QUAL_CLASS secondary
+    class DB,IMG_STORE,MODEL_STORE storage
+    class METRICS,LOGS,ALERTS monitoring
