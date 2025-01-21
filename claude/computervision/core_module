@@ -1,0 +1,851 @@
+Could you write the core computer vision module that will process images of cornmeal to detect quality issues? Include functionality for:
+
+Image preprocessing
+Feature extraction
+Anomaly detection algorithms
+Result classification
+
+I'll help you create a comprehensive computer vision module for cornmeal quality detection. We'll use modern CV techniques and ensure the code is well-documented and efficient.
+
+  I'll help you create a comprehensive computer vision module for cornmeal quality detection. We'll use modern CV techniques and ensure the code is well-documented and efficient.
+
+
+
+```python
+# src/computer_vision/preprocessor.py
+import cv2
+import numpy as np
+from typing import Tuple, Optional
+from PIL import Image
+import logging
+
+logger = logging.getLogger(__name__)
+
+class ImagePreprocessor:
+    """Handles preprocessing of cornmeal images for quality analysis."""
+    
+    def __init__(self, target_size: Tuple[int, int] = (224, 224),
+                 normalize: bool = True,
+                 enhance_contrast: bool = True):
+        """
+        Initialize preprocessor with configuration parameters.
+        
+        Args:
+            target_size: Target image dimensions for standardization
+            normalize: Whether to normalize pixel values
+            enhance_contrast: Whether to apply contrast enhancement
+        """
+        self.target_size = target_size
+        self.normalize = normalize
+        self.enhance_contrast = enhance_contrast
+        
+    def preprocess(self, image: np.ndarray) -> np.ndarray:
+        """
+        Apply preprocessing pipeline to input image.
+        
+        Args:
+            image: Input image as numpy array (BGR format)
+            
+        Returns:
+            Preprocessed image as numpy array
+        """
+        try:
+            # Convert BGR to RGB
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            
+            # Remove noise using bilateral filter to preserve edges
+            denoised = cv2.bilateralFilter(image, d=9, sigmaColor=75, sigmaSpace=75)
+            
+            if self.enhance_contrast:
+                # Convert to LAB color space for better contrast enhancement
+                lab = cv2.cvtColor(denoised, cv2.COLOR_RGB2LAB)
+                l, a, b = cv2.split(lab)
+                
+                # Apply CLAHE to L channel
+                clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+                enhanced_l = clahe.apply(l)
+                
+                # Merge channels and convert back to RGB
+                enhanced_lab = cv2.merge([enhanced_l, a, b])
+                denoised = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2RGB)
+            
+            # Resize image
+            resized = cv2.resize(denoised, self.target_size)
+            
+            if self.normalize:
+                # Normalize to range [0,1]
+                processed = resized.astype(np.float32) / 255.0
+            else:
+                processed = resized
+                
+            return processed
+            
+        except Exception as e:
+            logger.error(f"Error during image preprocessing: {str(e)}")
+            raise
+
+# src/computer_vision/feature_extractor.py
+import numpy as np
+from typing import Dict, List
+import cv2
+from sklearn.feature_extraction import image
+import logging
+
+logger = logging.getLogger(__name__)
+
+class FeatureExtractor:
+    """Extracts relevant features from preprocessed cornmeal images."""
+    
+    def __init__(self):
+        """Initialize feature extractor with necessary parameters."""
+        # Initialize GLCM parameters for texture analysis
+        self.distances = [1, 2, 3]
+        self.angles = [0, np.pi/4, np.pi/2, 3*np.pi/4]
+        
+    def extract_features(self, img: np.ndarray) -> Dict[str, float]:
+        """
+        Extract comprehensive feature set from image.
+        
+        Args:
+            img: Preprocessed image array
+            
+        Returns:
+            Dictionary containing extracted features
+        """
+        try:
+            features = {}
+            
+            # Color features
+            features.update(self._extract_color_features(img))
+            
+            # Texture features
+            features.update(self._extract_texture_features(img))
+            
+            # Shape features
+            features.update(self._extract_shape_features(img))
+            
+            return features
+            
+        except Exception as e:
+            logger.error(f"Error during feature extraction: {str(e)}")
+            raise
+            
+    def _extract_color_features(self, img: np.ndarray) -> Dict[str, float]:
+        """Extract color-based features."""
+        # Convert to different color spaces for robust analysis
+        hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+        lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
+        
+        features = {
+            'mean_hue': np.mean(hsv[:,:,0]),
+            'mean_saturation': np.mean(hsv[:,:,1]),
+            'mean_value': np.mean(hsv[:,:,2]),
+            'std_hue': np.std(hsv[:,:,0]),
+            'std_saturation': np.std(hsv[:,:,1]),
+            'std_value': np.std(hsv[:,:,2]),
+            'mean_l': np.mean(lab[:,:,0]),
+            'mean_a': np.mean(lab[:,:,1]),
+            'mean_b': np.mean(lab[:,:,2])
+        }
+        return features
+        
+    def _extract_texture_features(self, img: np.ndarray) -> Dict[str, float]:
+        """Extract texture-based features using GLCM."""
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        glcm = self._compute_glcm(gray)
+        
+        features = {
+            'contrast': self._glcm_contrast(glcm),
+            'homogeneity': self._glcm_homogeneity(glcm),
+            'energy': self._glcm_energy(glcm),
+            'correlation': self._glcm_correlation(glcm)
+        }
+        return features
+        
+    def _extract_shape_features(self, img: np.ndarray) -> Dict[str, float]:
+        """Extract shape and pattern-based features."""
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        
+        # Edge detection using Canny
+        edges = cv2.Canny(gray, 100, 200)
+        
+        features = {
+            'edge_density': np.sum(edges > 0) / (img.shape[0] * img.shape[1]),
+            'smoothness': 1 - (np.std(gray) / 128)
+        }
+        return features
+
+# src/computer_vision/anomaly_detector.py
+from typing import Dict, Tuple
+import numpy as np
+from sklearn.ensemble import IsolationForest
+import logging
+
+logger = logging.getLogger(__name__)
+
+class AnomalyDetector:
+    """Detects anomalies in cornmeal images using extracted features."""
+    
+    def __init__(self, contamination: float = 0.1):
+        """
+        Initialize anomaly detector.
+        
+        Args:
+            contamination: Expected proportion of outliers in the data
+        """
+        self.model = IsolationForest(
+            contamination=contamination,
+            random_state=42
+        )
+        self.feature_importance = {}
+        
+    def detect_anomalies(self, features: Dict[str, float]) -> Tuple[bool, float, Dict[str, float]]:
+        """
+        Detect anomalies in extracted features.
+        
+        Args:
+            features: Dictionary of extracted features
+            
+        Returns:
+            Tuple containing (is_anomaly, anomaly_score, feature_contributions)
+        """
+        try:
+            # Convert features to array format
+            feature_array = np.array(list(features.values())).reshape(1, -1)
+            
+            # Get anomaly score
+            score = self.model.score_samples(feature_array)[0]
+            
+            # Determine if sample is anomalous
+            is_anomaly = score < self.model.threshold_
+            
+            # Calculate feature contributions
+            contributions = self._calculate_feature_contributions(features, score)
+            
+            return is_anomaly, score, contributions
+            
+        except Exception as e:
+            logger.error(f"Error during anomaly detection: {str(e)}")
+            raise
+            
+    def _calculate_feature_contributions(self, 
+                                      features: Dict[str, float],
+                                      score: float) -> Dict[str, float]:
+        """Calculate how much each feature contributed to the anomaly score."""
+        contributions = {}
+        for feature_name, value in features.items():
+            # Calculate feature importance using deviation from expected values
+            if feature_name in self.feature_importance:
+                contribution = abs(value - self.feature_importance[feature_name])
+                contributions[feature_name] = contribution
+                
+        return contributions
+
+# src/computer_vision/quality_classifier.py
+from typing import Dict, List, Tuple
+import numpy as np
+from dataclasses import dataclass
+import logging
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class QualityAssessment:
+    """Structured quality assessment results."""
+    overall_score: float
+    quality_class: str
+    defect_types: List[str]
+    confidence: float
+    recommendations: List[str]
+
+class QualityClassifier:
+    """Classifies cornmeal quality based on detected anomalies and features."""
+    
+    def __init__(self):
+        """Initialize classifier with quality thresholds and criteria."""
+        self.quality_thresholds = {
+            'excellent': 0.9,
+            'good': 0.7,
+            'fair': 0.5,
+            'poor': 0.3
+        }
+        
+        self.defect_patterns = {
+            'mold': {'high_saturation', 'irregular_texture'},
+            'discoloration': {'color_variance', 'inconsistent_hue'},
+            'foreign_matter': {'edge_density', 'anomalous_shape'},
+            'moisture_damage': {'texture_irregularity', 'dark_spots'}
+        }
+        
+    def classify_quality(self,
+                        features: Dict[str, float],
+                        is_anomaly: bool,
+                        anomaly_score: float,
+                        feature_contributions: Dict[str, float]) -> QualityAssessment:
+        """
+        Classify cornmeal quality based on all available information.
+        
+        Args:
+            features: Extracted image features
+            is_anomaly: Whether sample was flagged as anomalous
+            anomaly_score: Anomaly detection score
+            feature_contributions: Contribution of each feature to anomaly score
+            
+        Returns:
+            QualityAssessment containing detailed quality information
+        """
+        try:
+            # Calculate overall quality score
+            overall_score = self._calculate_quality_score(
+                features, is_anomaly, anomaly_score
+            )
+            
+            # Determine quality class
+            quality_class = self._determine_quality_class(overall_score)
+            
+            # Identify specific defect types
+            defect_types = self._identify_defect_types(
+                features, feature_contributions
+            )
+            
+            # Calculate confidence in assessment
+            confidence = self._calculate_confidence(
+                features, anomaly_score, defect_types
+            )
+            
+            # Generate recommendations
+            recommendations = self._generate_recommendations(
+                quality_class, defect_types, overall_score
+            )
+            
+            return QualityAssessment(
+                overall_score=overall_score,
+                quality_class=quality_class,
+                defect_types=defect_types,
+                confidence=confidence,
+                recommendations=recommendations
+            )
+            
+        except Exception as e:
+            logger.error(f"Error during quality classification: {str(e)}")
+            raise
+            
+    def _calculate_quality_score(self,
+                               features: Dict[str, float],
+                               is_anomaly: bool,
+                               anomaly_score: float) -> float:
+        """Calculate overall quality score combining multiple factors."""
+        base_score = 1.0 - (abs(anomaly_score) if is_anomaly else 0)
+        
+        # Adjust score based on key features
+        color_penalty = (1 - features.get('color_consistency', 1)) * 0.3
+        texture_penalty = (1 - features.get('texture_uniformity', 1)) * 0.3
+        defect_penalty = features.get('edge_density', 0) * 0.4
+        
+        final_score = base_score - (color_penalty + texture_penalty + defect_penalty)
+        return max(0.0, min(1.0, final_score))
+        
+    def _determine_quality_class(self, score: float) -> str:
+        """Map quality score to quality class."""
+        for class_name, threshold in self.quality_thresholds.items():
+            if score >= threshold:
+                return class_name
+        return 'poor'
+        
+    def _identify_defect_types(self,
+                             features: Dict[str, float],
+                             contributions: Dict[str, float]) -> List[str]:
+        """Identify specific types of defects present in the sample."""
+        defects = []
+        
+        for defect_type, indicators in self.defect_patterns.items():
+            matching_indicators = sum(1 for ind in indicators
+                                   if features.get(ind, 0) > 0.7)
+            if matching_indicators >= len(indicators) / 2:
+                defects.append(defect_type)
+                
+        return defects
+        
+    def _calculate_confidence(self,
+                            features: Dict[str, float],
+                            anomaly_score: float,
+                            defect_types: List[str]) -> float:
+        """Calculate confidence level in the quality assessment."""
+        # Base confidence on feature consistency
+        base_confidence = 0.8
+        
+        # Adjust based on feature clarity
+        feature_clarity = np.mean(list(features.values()))
+        clarity_adjustment = (feature_clarity - 0.5) * 0.2
+        
+        # Adjust based on anomaly score certainty
+        anomaly_certainty = abs(anomaly_score) * 0.1
+        
+        # Adjust based on defect clarity
+        defect_adjustment = -0.1 if len(defect_types) > 2 else 0
+        
+        final_confidence = base_confidence + clarity_adjustment + \
+                         anomaly_certainty + defect_adjustment
+                         
+        return max(0.0, min(1.0, final_confidence))
+        
+    def _generate_recommendations(self,
+                                quality_class: str,
+                                defect_types: List[str],
+                                score: float) -> List[str]:
+        """Generate actionable recommendations based on quality assessment."""
+        recommendations = []
+        
+        if quality_class in ['poor', 'fair']:
+            recommendations.append(
+                "Product requires immediate attention and potential recall"
+            )
+            
+        for defect in defect_types:
+            if defect == 'mold':
+                recommendations.append(
+                    "Check storage conditions and improve moisture control"
+                )
+            elif defect == 'foreign_matter':
+                recommendations.append(
+                    "Review and enhance filtering and cleaning processes"
+                )
+            elif defect == 'discoloration':
+                recommendations.append(
+                    "Evaluate raw material quality and processing parameters"
+                )
+                
+        if score < 0.5:
+            recommendations.append(
+                "Conduct full quality audit of production line"
+            )
+            
+        return recommendations
+
+```
+
+I've created a comprehensive computer vision pipeline for cornmeal quality detection. Let me explain the key components and their interactions:
+
+1. Image Preprocessor:
+   - Handles initial image preparation including noise reduction and contrast enhancement
+   - Uses bilateral filtering to preserve edges while removing noise
+   - Implements CLAHE (Contrast Limited Adaptive Histogram Equalization) for better contrast
+   - Standardizes image sizes and normalizes pixel values
+
+2. Feature Extractor:
+   - Extracts three types of features:
+     - Color features in multiple color spaces (RGB, HSV, LAB)
+     - Texture features using GLCM (Gray Level Co-occurrence Matrix)
+     - Shape and pattern features
+
+Cornmeal Quality CV Detection Pipeline
+
+# src/computer_vision/preprocessor.py
+import cv2
+import numpy as np
+from typing import Tuple, Optional
+from PIL import Image
+import logging
+
+logger = logging.getLogger(__name__)
+
+class ImagePreprocessor:
+    """Handles preprocessing of cornmeal images for quality analysis."""
+    
+    def __init__(self, target_size: Tuple[int, int] = (224, 224),
+                 normalize: bool = True,
+                 enhance_contrast: bool = True):
+        """
+        Initialize preprocessor with configuration parameters.
+        
+        Args:
+            target_size: Target image dimensions for standardization
+            normalize: Whether to normalize pixel values
+            enhance_contrast: Whether to apply contrast enhancement
+        """
+        self.target_size = target_size
+        self.normalize = normalize
+        self.enhance_contrast = enhance_contrast
+        
+    def preprocess(self, image: np.ndarray) -> np.ndarray:
+        """
+        Apply preprocessing pipeline to input image.
+        
+        Args:
+            image: Input image as numpy array (BGR format)
+            
+        Returns:
+            Preprocessed image as numpy array
+        """
+        try:
+            # Convert BGR to RGB
+            image = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
+            
+            # Remove noise using bilateral filter to preserve edges
+            denoised = cv2.bilateralFilter(image, d=9, sigmaColor=75, sigmaSpace=75)
+            
+            if self.enhance_contrast:
+                # Convert to LAB color space for better contrast enhancement
+                lab = cv2.cvtColor(denoised, cv2.COLOR_RGB2LAB)
+                l, a, b = cv2.split(lab)
+                
+                # Apply CLAHE to L channel
+                clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8,8))
+                enhanced_l = clahe.apply(l)
+                
+                # Merge channels and convert back to RGB
+                enhanced_lab = cv2.merge([enhanced_l, a, b])
+                denoised = cv2.cvtColor(enhanced_lab, cv2.COLOR_LAB2RGB)
+            
+            # Resize image
+            resized = cv2.resize(denoised, self.target_size)
+            
+            if self.normalize:
+                # Normalize to range [0,1]
+                processed = resized.astype(np.float32) / 255.0
+            else:
+                processed = resized
+                
+            return processed
+            
+        except Exception as e:
+            logger.error(f"Error during image preprocessing: {str(e)}")
+            raise
+
+# src/computer_vision/feature_extractor.py
+import numpy as np
+from typing import Dict, List
+import cv2
+from sklearn.feature_extraction import image
+import logging
+
+logger = logging.getLogger(__name__)
+
+class FeatureExtractor:
+    """Extracts relevant features from preprocessed cornmeal images."""
+    
+    def __init__(self):
+        """Initialize feature extractor with necessary parameters."""
+        # Initialize GLCM parameters for texture analysis
+        self.distances = [1, 2, 3]
+        self.angles = [0, np.pi/4, np.pi/2, 3*np.pi/4]
+        
+    def extract_features(self, img: np.ndarray) -> Dict[str, float]:
+        """
+        Extract comprehensive feature set from image.
+        
+        Args:
+            img: Preprocessed image array
+            
+        Returns:
+            Dictionary containing extracted features
+        """
+        try:
+            features = {}
+            
+            # Color features
+            features.update(self._extract_color_features(img))
+            
+            # Texture features
+            features.update(self._extract_texture_features(img))
+            
+            # Shape features
+            features.update(self._extract_shape_features(img))
+            
+            return features
+            
+        except Exception as e:
+            logger.error(f"Error during feature extraction: {str(e)}")
+            raise
+            
+    def _extract_color_features(self, img: np.ndarray) -> Dict[str, float]:
+        """Extract color-based features."""
+        # Convert to different color spaces for robust analysis
+        hsv = cv2.cvtColor(img, cv2.COLOR_RGB2HSV)
+        lab = cv2.cvtColor(img, cv2.COLOR_RGB2LAB)
+        
+        features = {
+            'mean_hue': np.mean(hsv[:,:,0]),
+            'mean_saturation': np.mean(hsv[:,:,1]),
+            'mean_value': np.mean(hsv[:,:,2]),
+            'std_hue': np.std(hsv[:,:,0]),
+            'std_saturation': np.std(hsv[:,:,1]),
+            'std_value': np.std(hsv[:,:,2]),
+            'mean_l': np.mean(lab[:,:,0]),
+            'mean_a': np.mean(lab[:,:,1]),
+            'mean_b': np.mean(lab[:,:,2])
+        }
+        return features
+        
+    def _extract_texture_features(self, img: np.ndarray) -> Dict[str, float]:
+        """Extract texture-based features using GLCM."""
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        glcm = self._compute_glcm(gray)
+        
+        features = {
+            'contrast': self._glcm_contrast(glcm),
+            'homogeneity': self._glcm_homogeneity(glcm),
+            'energy': self._glcm_energy(glcm),
+            'correlation': self._glcm_correlation(glcm)
+        }
+        return features
+        
+    def _extract_shape_features(self, img: np.ndarray) -> Dict[str, float]:
+        """Extract shape and pattern-based features."""
+        gray = cv2.cvtColor(img, cv2.COLOR_RGB2GRAY)
+        
+        # Edge detection using Canny
+        edges = cv2.Canny(gray, 100, 200)
+        
+        features = {
+            'edge_density': np.sum(edges > 0) / (img.shape[0] * img.shape[1]),
+            'smoothness': 1 - (np.std(gray) / 128)
+        }
+        return features
+
+# src/computer_vision/anomaly_detector.py
+from typing import Dict, Tuple
+import numpy as np
+from sklearn.ensemble import IsolationForest
+import logging
+
+logger = logging.getLogger(__name__)
+
+class AnomalyDetector:
+    """Detects anomalies in cornmeal images using extracted features."""
+    
+    def __init__(self, contamination: float = 0.1):
+        """
+        Initialize anomaly detector.
+        
+        Args:
+            contamination: Expected proportion of outliers in the data
+        """
+        self.model = IsolationForest(
+            contamination=contamination,
+            random_state=42
+        )
+        self.feature_importance = {}
+        
+    def detect_anomalies(self, features: Dict[str, float]) -> Tuple[bool, float, Dict[str, float]]:
+        """
+        Detect anomalies in extracted features.
+        
+        Args:
+            features: Dictionary of extracted features
+            
+        Returns:
+            Tuple containing (is_anomaly, anomaly_score, feature_contributions)
+        """
+        try:
+            # Convert features to array format
+            feature_array = np.array(list(features.values())).reshape(1, -1)
+            
+            # Get anomaly score
+            score = self.model.score_samples(feature_array)[0]
+            
+            # Determine if sample is anomalous
+            is_anomaly = score < self.model.threshold_
+            
+            # Calculate feature contributions
+            contributions = self._calculate_feature_contributions(features, score)
+            
+            return is_anomaly, score, contributions
+            
+        except Exception as e:
+            logger.error(f"Error during anomaly detection: {str(e)}")
+            raise
+            
+    def _calculate_feature_contributions(self, 
+                                      features: Dict[str, float],
+                                      score: float) -> Dict[str, float]:
+        """Calculate how much each feature contributed to the anomaly score."""
+        contributions = {}
+        for feature_name, value in features.items():
+            # Calculate feature importance using deviation from expected values
+            if feature_name in self.feature_importance:
+                contribution = abs(value - self.feature_importance[feature_name])
+                contributions[feature_name] = contribution
+                
+        return contributions
+
+# src/computer_vision/quality_classifier.py
+from typing import Dict, List, Tuple
+import numpy as np
+from dataclasses import dataclass
+import logging
+
+logger = logging.getLogger(__name__)
+
+@dataclass
+class QualityAssessment:
+    """Structured quality assessment results."""
+    overall_score: float
+    quality_class: str
+    defect_types: List[str]
+    confidence: float
+    recommendations: List[str]
+
+class QualityClassifier:
+    """Classifies cornmeal quality based on detected anomalies and features."""
+    
+    def __init__(self):
+        """Initialize classifier with quality thresholds and criteria."""
+        self.quality_thresholds = {
+            'excellent': 0.9,
+            'good': 0.7,
+            'fair': 0.5,
+            'poor': 0.3
+        }
+        
+        self.defect_patterns = {
+            'mold': {'high_saturation', 'irregular_texture'},
+            'discoloration': {'color_variance', 'inconsistent_hue'},
+            'foreign_matter': {'edge_density', 'anomalous_shape'},
+            'moisture_damage': {'texture_irregularity', 'dark_spots'}
+        }
+        
+    def classify_quality(self,
+                        features: Dict[str, float],
+                        is_anomaly: bool,
+                        anomaly_score: float,
+                        feature_contributions: Dict[str, float]) -> QualityAssessment:
+        """
+        Classify cornmeal quality based on all available information.
+        
+        Args:
+            features: Extracted image features
+            is_anomaly: Whether sample was flagged as anomalous
+            anomaly_score: Anomaly detection score
+            feature_contributions: Contribution of each feature to anomaly score
+            
+        Returns:
+            QualityAssessment containing detailed quality information
+        """
+        try:
+            # Calculate overall quality score
+            overall_score = self._calculate_quality_score(
+                features, is_anomaly, anomaly_score
+            )
+            
+            # Determine quality class
+            quality_class = self._determine_quality_class(overall_score)
+            
+            # Identify specific defect types
+            defect_types = self._identify_defect_types(
+                features, feature_contributions
+            )
+            
+            # Calculate confidence in assessment
+            confidence = self._calculate_confidence(
+                features, anomaly_score, defect_types
+            )
+            
+            # Generate recommendations
+            recommendations = self._generate_recommendations(
+                quality_class, defect_types, overall_score
+            )
+            
+            return QualityAssessment(
+                overall_score=overall_score,
+                quality_class=quality_class,
+                defect_types=defect_types,
+                confidence=confidence,
+                recommendations=recommendations
+            )
+            
+        except Exception as e:
+            logger.error(f"Error during quality classification: {str(e)}")
+            raise
+            
+    def _calculate_quality_score(self,
+                               features: Dict[str, float],
+                               is_anomaly: bool,
+                               anomaly_score: float) -> float:
+        """Calculate overall quality score combining multiple factors."""
+        base_score = 1.0 - (abs(anomaly_score) if is_anomaly else 0)
+        
+        # Adjust score based on key features
+        color_penalty = (1 - features.get('color_consistency', 1)) * 0.3
+        texture_penalty = (1 - features.get('texture_uniformity', 1)) * 0.3
+        defect_penalty = features.get('edge_density', 0) * 0.4
+        
+        final_score = base_score - (color_penalty + texture_penalty + defect_penalty)
+        return max(0.0, min(1.0, final_score))
+        
+    def _determine_quality_class(self, score: float) -> str:
+        """Map quality score to quality class."""
+        for class_name, threshold in self.quality_thresholds.items():
+            if score >= threshold:
+                return class_name
+        return 'poor'
+        
+    def _identify_defect_types(self,
+                             features: Dict[str, float],
+                             contributions: Dict[str, float]) -> List[str]:
+        """Identify specific types of defects present in the sample."""
+        defects = []
+        
+        for defect_type, indicators in self.defect_patterns.items():
+            matching_indicators = sum(1 for ind in indicators
+                                   if features.get(ind, 0) > 0.7)
+            if matching_indicators >= len(indicators) / 2:
+                defects.append(defect_type)
+                
+        return defects
+        
+    def _calculate_confidence(self,
+                            features: Dict[str, float],
+                            anomaly_score: float,
+                            defect_types: List[str]) -> float:
+        """Calculate confidence level in the quality assessment."""
+        # Base confidence on feature consistency
+        base_confidence = 0.8
+        
+        # Adjust based on feature clarity
+        feature_clarity = np.mean(list(features.values()))
+        clarity_adjustment = (feature_clarity - 0.5) * 0.2
+        
+        # Adjust based on anomaly score certainty
+        anomaly_certainty = abs(anomaly_score) * 0.1
+        
+        # Adjust based on defect clarity
+        defect_adjustment = -0.1 if len(defect_types) > 2 else 0
+        
+        final_confidence = base_confidence + clarity_adjustment + \
+                         anomaly_certainty + defect_adjustment
+                         
+        return max(0.0, min(1.0, final_confidence))
+        
+    def _generate_recommendations(self,
+                                quality_class: str,
+                                defect_types: List[str],
+                                score: float) -> List[str]:
+        """Generate actionable recommendations based on quality assessment."""
+        recommendations = []
+        
+        if quality_class in ['poor', 'fair']:
+            recommendations.append(
+                "Product requires immediate attention and potential recall"
+            )
+            
+        for defect in defect_types:
+            if defect == 'mold':
+                recommendations.append(
+                    "Check storage conditions and improve moisture control"
+                )
+            elif defect == 'foreign_matter':
+                recommendations.append(
+                    "Review and enhance filtering and cleaning processes"
+                )
+            elif defect == 'discoloration':
+                recommendations.append(
+                    "Evaluate raw material quality and processing parameters"
+                )
+                
+        if score < 0.5:
+            recommendations.append(
+                "Conduct full quality audit of production line"
+            )
+            
+        return recommendations
