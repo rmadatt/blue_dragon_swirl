@@ -1,0 +1,31 @@
+version: '3'
+services:
+  web:
+    build: .
+    ports:
+      - "8000:80"
+    volumes:
+      - .:/app
+    environment:
+      - NAME=World
+      
+
+Explanation:
+Dockerfile: This file defines the environment for your project. It starts with a base image (Python 3.8-slim), sets the working directory, copies your project files into the container, installs dependencies from requirements.txt, exposes a port, sets an environment variable, and specifies the command to run your application.
+
+docker-compose.yml: This file defines how to run multi-container Docker applications. It specifies the build context, ports to expose, volumes to mount, and environment variables.
+
+Steps to Build and Run:
+Build the Docker image:
+
+sh
+docker build -t your_project_name .
+Run the Docker container:
+
+sh
+docker run -p 8000:80 your_project_name
+This setup will create a Docker environment for your computer vision project, allowing you to run your application in a consistent and isolated environment.
+
+Does this help with what you're looking for? If you need more specific details or further assistance, feel free to ask!
+
+1github.com
