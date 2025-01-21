@@ -1,0 +1,392 @@
+Can you create a FastAPI-based REST API with endpoints for:
+Uploading images
+Processing detection requests
+Retrieving results
+Basic authentication and security measures
+
+I'll help you create a secure FastAPI application for your cornmeal quality detection system. Let's build a robust API with authentication and proper error handling.
+
+FastAPI Cornmeal Quality Detection API
+Let me explain the key components and security measures implemented in this API:
+
+Authentication System:
+
+Uses JWT (JSON Web Tokens) for secure authentication
+Implements password hashing using bcrypt
+Provides token-based authentication with expiration
+Includes user management and validation
+
+
+API Endpoints:
+
+POST /token: Authentication endpoint for obtaining access tokens
+POST /upload: Secure endpoint for uploading and processing images
+GET /results/{detection_id}: Retrieve specific detection results
+GET /results: List all detection results with pagination
+
+
+Security Measures:
+
+Input validation using Pydantic models
+File type validation for uploads
+Error handling and logging
+Rate limiting (can be added through middleware)
+Secure file handling using aiofiles
+
+
+Response Models:
+
+Structured responses using Pydantic
+Clear error messages
+Type validation
+Comprehensive result information
+
+# src/api/auth.py
+from datetime import datetime, timedelta
+from typing import Optional
+from fastapi import Depends, HTTPException, status
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from jose import JWTError, jwt
+from passlib.context import CryptContext
+from pydantic import BaseModel
+from config.settings import settings
+
+# Security configurations
+pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+oauth2_scheme = OAuth2PasswordBearer(tokenUrl="token")
+
+class Token(BaseModel):
+    access_token: str
+    token_type: str
+
+class TokenData(BaseModel):
+    username: Optional[str] = None
+
+class User(BaseModel):
+    username: str
+    email: Optional[str] = None
+    full_name: Optional[str] = None
+    disabled: Optional[bool] = None
+
+def verify_password(plain_password: str, hashed_password: str) -> bool:
+    return pwd_context.verify(plain_password, hashed_password)
+
+def get_password_hash(password: str) -> str:
+    return pwd_context.hash(password)
+
+def create_access_token(data: dict, expires_delta: Optional[timedelta] = None):
+    to_encode = data.copy()
+    if expires_delta:
+        expire = datetime.utcnow() + expires_delta
+    else:
+        expire = datetime.utcnow() + timedelta(minutes=15)
+    to_encode.update({"exp": expire})
+    encoded_jwt = jwt.encode(to_encode, settings.SECRET_KEY, algorithm="HS256")
+    return encoded_jwt
+
+async def get_current_user(token: str = Depends(oauth2_scheme)) -> User:
+    credentials_exception = HTTPException(
+        status_code=status.HTTP_401_UNAUTHORIZED,
+        detail="Could not validate credentials",
+        headers={"WWW-Authenticate": "Bearer"},
+    )
+    try:
+        payload = jwt.decode(token, settings.SECRET_KEY, algorithms=["HS256"])
+        username: str = payload.get("sub")
+        if username is None:
+            raise credentials_exception
+        token_data = TokenData(username=username)
+    except JWTError:
+        raise credentials_exception
+    user = get_user(username=token_data.username)
+    if user is None:
+        raise credentials_exception
+    return user
+
+# src/api/models.py
+from pydantic import BaseModel, Field
+from typing import List, Optional
+from datetime import datetime
+from enum import Enum
+
+class QualityClass(str, Enum):
+    EXCELLENT = "excellent"
+    GOOD = "good"
+    FAIR = "fair"
+    POOR = "poor"
+
+class DetectionResult(BaseModel):
+    image_id: str
+    timestamp: datetime
+    quality_class: QualityClass
+    overall_score: float = Field(..., ge=0, le=1)
+    defect_types: List[str]
+    confidence: float = Field(..., ge=0, le=1)
+    recommendations: List[str]
+
+class DetectionResponse(BaseModel):
+    result_id: str
+    status: str
+    result: Optional[DetectionResult] = None
+    error: Optional[str] = None
+
+# src/api/routes.py
+from fastapi import APIRouter, Depends, File, UploadFile, HTTPException, status
+from fastapi.security import OAuth2PasswordRequestForm
+from typing import List
+import uuid
+import aiofiles
+from datetime import timedelta
+import cv2
+import numpy as np
+import logging
+from .auth import (
+    Token, User, create_access_token, get_current_user,
+    verify_password, get_password_hash
+)
+from .models import DetectionResponse, DetectionResult
+from computer_vision.preprocessor import ImagePreprocessor
+from computer_vision.feature_extractor import FeatureExtractor
+from computer_vision.anomaly_detector import AnomalyDetector
+from computer_vision.quality_classifier import QualityClassifier
+from config.settings import settings
+
+logger = logging.getLogger(__name__)
+router = APIRouter()
+
+# Initialize CV pipeline components
+preprocessor = ImagePreprocessor()
+feature_extractor = FeatureExtractor()
+anomaly_detector = AnomalyDetector()
+quality_classifier = QualityClassifier()
+
+@router.post("/token", response_model=Token)
+async def login_for_access_token(form_data: OAuth2PasswordRequestForm = Depends()):
+    """Authenticate user and return JWT token."""
+    user = authenticate_user(form_data.username, form_data.password)
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Incorrect username or password",
+            headers={"WWW-Authenticate": "Bearer"},
+        )
+    access_token_expires = timedelta(minutes=settings.ACCESS_TOKEN_EXPIRE_MINUTES)
+    access_token = create_access_token(
+        data={"sub": user.username}, expires_delta=access_token_expires
+    )
+    return {"access_token": access_token, "token_type": "bearer"}
+
+@router.post("/upload", response_model=DetectionResponse)
+async def upload_image(
+    file: UploadFile = File(...),
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Upload and process an image for quality detection.
+    
+    Args:
+        file: Image file to be processed
+        current_user: Authenticated user making the request
+        
+    Returns:
+        DetectionResponse containing processing status and results
+    """
+    try:
+        # Validate file type
+        if file.content_type not in ["image/jpeg", "image/png"]:
+            raise HTTPException(
+                status_code=400,
+                detail="Only JPEG and PNG images are supported"
+            )
+            
+        # Generate unique ID for this detection
+        detection_id = str(uuid.uuid4())
+        
+        # Read and process image
+        contents = await file.read()
+        nparr = np.frombuffer(contents, np.uint8)
+        image = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        
+        # Process image through CV pipeline
+        processed_image = preprocessor.preprocess(image)
+        features = feature_extractor.extract_features(processed_image)
+        is_anomaly, anomaly_score, contributions = anomaly_detector.detect_anomalies(features)
+        quality_assessment = quality_classifier.classify_quality(
+            features, is_anomaly, anomaly_score, contributions
+        )
+        
+        # Save image and results
+        await save_detection_data(detection_id, contents, quality_assessment)
+        
+        # Create response
+        result = DetectionResult(
+            image_id=detection_id,
+            timestamp=datetime.utcnow(),
+            quality_class=quality_assessment.quality_class,
+            overall_score=quality_assessment.overall_score,
+            defect_types=quality_assessment.defect_types,
+            confidence=quality_assessment.confidence,
+            recommendations=quality_assessment.recommendations
+        )
+        
+        return DetectionResponse(
+            result_id=detection_id,
+            status="success",
+            result=result
+        )
+        
+    except Exception as e:
+        logger.error(f"Error processing image: {str(e)}")
+        return DetectionResponse(
+            result_id=str(uuid.uuid4()),
+            status="error",
+            error=str(e)
+        )
+
+@router.get("/results/{detection_id}", response_model=DetectionResponse)
+async def get_detection_result(
+    detection_id: str,
+    current_user: User = Depends(get_current_user)
+):
+    """
+    Retrieve results for a specific detection by ID.
+    
+    Args:
+        detection_id: Unique identifier for the detection
+        current_user: Authenticated user making the request
+        
+    Returns:
+        DetectionResponse containing the requested results
+    """
+    try:
+        # Retrieve results from storage
+        result = await load_detection_result(detection_id)
+        
+        if not result:
+            raise HTTPException(
+                status_code=404,
+                detail="Detection result not found"
+            )
+            
+        return DetectionResponse(
+            result_id=detection_id,
+            status="success",
+            result=result
+        )
+        
+    except Exception as e:
+        logger.error(f"Error retrieving results: {str(e)}")
+        return DetectionResponse(
+            result_id=detection_id,
+            status="error",
+            error=str(e)
+        )
+
+@router.get("/results", response_model=List[DetectionResponse])
+async def list_detection_results(
+    current_user: User = Depends(get_current_user),
+    skip: int = 0,
+    limit: int = 10
+):
+    """
+    List all detection results with pagination.
+    
+    Args:
+        current_user: Authenticated user making the request
+        skip: Number of records to skip
+        limit: Maximum number of records to return
+        
+    Returns:
+        List of DetectionResponse objects
+    """
+    try:
+        results = await load_detection_results(skip, limit)
+        return [
+            DetectionResponse(
+                result_id=r.detection_id,
+                status="success",
+                result=r
+            )
+            for r in results
+        ]
+        
+    except Exception as e:
+        logger.error(f"Error listing results: {str(e)}")
+        raise HTTPException(
+            status_code=500,
+            detail="Error retrieving results"
+        )
+
+# Utility functions for data persistence
+async def save_detection_data(detection_id: str, image_data: bytes, assessment: QualityAssessment):
+    """Save detection data to storage."""
+    try:
+        # Save image
+        async with aiofiles.open(f"data/images/{detection_id}.jpg", mode='wb') as f:
+            await f.write(image_data)
+            
+        # Save results to database
+        # Implementation depends on your database choice
+        pass
+        
+    except Exception as e:
+        logger.error(f"Error saving detection data: {str(e)}")
+        raise
+
+async def load_detection_result(detection_id: str) -> Optional[DetectionResult]:
+    """Load detection result from storage."""
+    try:
+        # Implementation depends on your database choice
+        pass
+        
+    except Exception as e:
+        logger.error(f"Error loading detection result: {str(e)}")
+        raise
+
+async def load_detection_results(skip: int, limit: int) -> List[DetectionResult]:
+    """Load multiple detection results with pagination."""
+    try:
+        # Implementation depends on your database choice
+        pass
+        
+    except Exception as e:
+        logger.error(f"Error loading detection results: {str(e)}")
+        raise
+
+To use this API:
+
+Authentication:
+
+pythonCopy# Get access token
+response = requests.post(
+    "http://your-api/token",
+    data={"username": "user", "password": "pass"}
+)
+token = response.json()["access_token"]
+
+Upload Image:
+
+pythonCopy# Upload image for processing
+headers = {"Authorization": f"Bearer {token}"}
+files = {"file": open("cornmeal_sample.jpg", "rb")}
+response = requests.post(
+    "http://your-api/upload",
+    headers=headers,
+    files=files
+)
+
+Retrieve Results:
+
+pythonCopy# Get specific result
+detection_id = "your-detection-id"
+response = requests.get(
+    f"http://your-api/results/{detection_id}",
+    headers=headers
+)
+
+Would you like me to:
+
+Add any specific security measures for your Nigerian deployment?
+Implement database integration for result storage?
+Add additional endpoints for specific use cases?
+Implement rate limiting or other security features?
