@@ -1,0 +1,47 @@
+I understand you're working on an important computer vision project to detect anomalies in cornmeal processing in Nigeria, with the ultimate goal of ensuring food safety for children. This is a meaningful project that combines social impact with technical innovation. Let me help you structure your approach.
+
+First, let me outline what an effective prompt sequence could look like for building this system step by step. We want to ensure we follow a systematic software development lifecycle (SDLC) approach while incorporating Python best practices.
+
+Here's a suggested sequence of prompts you could use with me to develop your system:
+
+1. "Can you help me design a system architecture diagram showing the key components of the cornmeal quality detection system, including the computer vision pipeline, API endpoints, and data flow?"
+
+2. "Please help me create a basic project structure following Python best practices, including directory organization, requirements.txt, and essential configuration files for a computer vision project."
+
+3. "Could you write the core computer vision module that will process images of cornmeal to detect quality issues? Include functionality for:
+   - Image preprocessing
+   - Feature extraction
+   - Anomaly detection algorithms
+   - Result classification"
+
+4. "Can you create a FastAPI-based REST API with endpoints for:
+   - Uploading images
+   - Processing detection requests
+   - Retrieving results
+   - Basic authentication and security measures"
+
+5. "Please help me implement a simple web interface for:
+   - Image upload
+   - Result visualization
+   - Historical data viewing"
+
+6. "Can you write unit tests and integration tests for both the computer vision and API components?"
+
+7. "Please help me implement proper logging, error handling, and monitoring for production deployment."
+
+8. "Can you help me create documentation for:
+   - API endpoints
+   - System setup
+   - Usage guidelines
+   - Maintenance procedures"
+
+For each of these steps, I can provide detailed code, explanations, and best practices. Would you like to start with any particular aspect? It might be most logical to begin with the system architecture to ensure we have a solid foundation.
+
+I can also help you consider important factors specific to your context:
+- Local infrastructure requirements in Nigeria
+- Processing speed vs. accuracy tradeoffs
+- Handling various lighting conditions in different facilities
+- Storage and backup considerations
+- Scalability needs
+
+What aspect would you like to explore first? I recommend starting with the system architecture so we can ensure the foundation is solid before diving into specific components.
